@@ -1,10 +1,12 @@
-import { log } from "node:console";
 import {
-  CredentialInputs,
-  CredentialKeeperStatus,
-  CredentialKey,
-  CredentialName,
-  StatusChangeCallback,
+  Credentials,
+  CredentialsScopeEnum,
+  CredentialsType,
+  KlaviyoCredentialNameEnum,
+  KlaviyoCredentials,
+  matchCredentialScopeName,
+  SellsyCredentialNameEnum,
+  SellsyCredentials,
 } from "../interfaces/credential.interface";
 import {
   ab2b64,
@@ -16,98 +18,133 @@ import {
 const validTag = "-v4l1d";
 
 class CredentialKeeper {
-  private hashedPin: string;
-  private encryptCredentials: CredentialInputs;
-  private testPinCount: number;
-  private status: CredentialKeeperStatus;
-  private onStatusChange: StatusChangeCallback | null = null;
+  private hashedPin: string = "";
+  private encryptedCredentials: Credentials = this.emptyCredentials();
+  private testPinCount: number = 0;
 
   constructor() {
-    this.status = CredentialKeeperStatus.WaitingCredentials;
-    this.testPinCount = 0;
-    this.hashedPin = "";
-    this.encryptCredentials = {
-      consumerToken: "",
-      consumerSecret: "",
-      userToken: "",
-      userSecret: "",
-    };
     this.fetchCredentials();
-  }
-
-  private setStatus(newStatus: CredentialKeeperStatus) {
-    this.status = newStatus;
-    if (this.onStatusChange) {
-      this.onStatusChange(newStatus);
-    }
   }
 
   private setHashedPin(pin: string) {
     this.hashedPin = pin;
   }
 
-  setOnStatusChangeCallback(callback: StatusChangeCallback) {
-    this.onStatusChange = callback;
+  public async decryptedCredentials(
+    credentialScope: Omit<CredentialsScopeEnum, CredentialsScopeEnum.Test>
+  ): Promise<CredentialsType> {
+    switch (credentialScope) {
+      case CredentialsScopeEnum.Klaviyo:
+        return Object.values(KlaviyoCredentialNameEnum).reduce(
+          async (accPromise, key) => {
+            const acc = await accPromise; // Wait for the accumulated promise to resolve
+            const hashedKey = await hashData(credentialScope + key);
+            const encryptedValue = localStorage.getItem(
+              `credential-${hashedKey}`
+            );
+
+            if (encryptedValue) {
+              acc[key] = await this.decryptData(encryptedValue, this.hashedPin); // Decrypt and assign to the accumulator
+            }
+
+            return acc;
+          },
+          Promise.resolve({} as KlaviyoCredentials)
+        );
+      case CredentialsScopeEnum.Sellsy:
+        return Object.values(SellsyCredentialNameEnum).reduce(
+          async (accPromise, key) => {
+            const acc = await accPromise; // Wait for the accumulated promise to resolve
+            const hashedKey = await hashData(credentialScope + key);
+            const encryptedValue = localStorage.getItem(
+              `credential-${hashedKey}`
+            );
+
+            if (encryptedValue) {
+              acc[key] = await this.decryptData(encryptedValue, this.hashedPin); // Decrypt and assign to the accumulator
+            }
+
+            return acc;
+          },
+          Promise.resolve({} as SellsyCredentials)
+        );
+      default:
+        throw new Error("Invalid credential scope provided");
+    }
   }
 
-  public async decryptedCredentials(): Promise<CredentialInputs> {
-    return {
-      consumerToken: await this.decryptData(
-        this.encryptCredentials.consumerToken,
-        this.hashedPin
-      ),
-      consumerSecret: await this.decryptData(
-        this.encryptCredentials.consumerSecret,
-        this.hashedPin
-      ),
-      userToken: await this.decryptData(
-        this.encryptCredentials.userToken,
-        this.hashedPin
-      ),
-      userSecret: await this.decryptData(
-        this.encryptCredentials.userSecret,
-        this.hashedPin
-      ),
-    };
-  }
+  public async secure(
+    credentials: CredentialsType,
+    credentialScope: CredentialsScopeEnum
+  ) {
+    return await Promise.all(
+      Object.entries(credentials).map(
+        async ([key, value]: [string, string]) => {
+          const credentialValue = value.trim();
 
-  public async secure(credentialInputs: CredentialInputs): Promise<string[]> {
-    const pin = this.randomPin();
-    
-    await Promise.all(
-      Object.values(CredentialName).map(async (credentialName) => {
-        
-        const credentialValue = credentialInputs[credentialName].trim();
+          if (credentialValue) {
+            const encryptedValue = await this.encryptData(
+              credentialValue,
+              this.hashedPin
+            );
 
-        if (credentialValue) {
-          const hashedPin = await hashData(pin.join(""));
-          const encryptedValue = await this.encryptData(
-            credentialValue + validTag,
-            hashedPin
-          );
-          this.setHashedPin(hashedPin);
-          
-          this.encryptCredentials[credentialName] =
-            encryptedValue;
-          const hashedName = await hashData(credentialName.toString());
-          localStorage.setItem(`credential-${hashedName}`, encryptedValue);
+            const credentialName = credentialScope + key;
+
+            switch (credentialScope) {
+              case CredentialsScopeEnum.Sellsy:
+                (
+                  this.encryptedCredentials[
+                    credentialScope
+                  ] as SellsyCredentials
+                )[key as keyof SellsyCredentials] = encryptedValue;
+                break;
+              case CredentialsScopeEnum.Klaviyo:
+                (
+                  this.encryptedCredentials[
+                    credentialScope
+                  ] as KlaviyoCredentials
+                )[key as keyof KlaviyoCredentials] = encryptedValue;
+                break;
+            }
+            const hashedName = await hashData(credentialName.toString());
+            localStorage.setItem(`credential-${hashedName}`, encryptedValue);
+          }
         }
-      })
+      )
     );
-    
-    return pin;
   }
 
-  private validEncryptedCredentials() {
-    return Object.values(this.encryptCredentials).every((value) => value);
+  private emptyCredentials() {
+    return Object.values(CredentialsScopeEnum).reduce((acc, scope) => {
+      if (scope === CredentialsScopeEnum.Sellsy) {
+        acc[scope] = this.createEmptySellsyCredentials();
+      } else if (scope === CredentialsScopeEnum.Klaviyo) {
+        acc[scope] = this.createEmptyKlaviyoCredentials();
+      } else {
+        acc[scope] = "";
+      }
+      return acc;
+    }, {} as Credentials);
+  }
+
+  private createEmptySellsyCredentials(): SellsyCredentials {
+    const emptySellsyCredentials: Partial<SellsyCredentials> = {};
+    Object.values(SellsyCredentialNameEnum).forEach((key) => {
+      emptySellsyCredentials[key] = "";
+    });
+    return emptySellsyCredentials as SellsyCredentials;
+  }
+
+  private createEmptyKlaviyoCredentials(): KlaviyoCredentials {
+    const emptyKlaviyoCredentials: Partial<KlaviyoCredentials> = {};
+    Object.values(KlaviyoCredentialNameEnum).forEach((key) => {
+      emptyKlaviyoCredentials[key] = "";
+    });
+    return emptyKlaviyoCredentials as KlaviyoCredentials;
   }
 
   public get remainingPinTest(): number {
     return 3 - this.testPinCount;
-  }
-
-  public confirmMemorizedPin() {
-    this.setStatus(CredentialKeeperStatus.RequirePin);
   }
 
   public async reset() {
@@ -119,13 +156,8 @@ class CredentialKeeper {
       localStorage.removeItem(key);
     }
 
-    this.encryptCredentials.consumerToken = "";
-    this.encryptCredentials.consumerSecret = "";
-    this.encryptCredentials.userToken = "";
-    this.encryptCredentials.userSecret = "";
+    this.encryptedCredentials = this.emptyCredentials();
     this.hashedPin = "";
-
-    this.setStatus(CredentialKeeperStatus.WaitingCredentials);
   }
 
   private randomPin(length: number = 4): string[] {
@@ -136,34 +168,46 @@ class CredentialKeeper {
 
   public async fetchCredentials(): Promise<void> {
     await Promise.all(
-      Object.values(CredentialName).map(async (credentialName) => {
-        const hashedName = await hashData(credentialName);
-        const encryptedValue = localStorage.getItem(`credential-${hashedName}`);        
+      Object.values(CredentialsScopeEnum).map(async (credentialScope) => {
+        const credentialNames = matchCredentialScopeName[credentialScope];
 
-        if (encryptedValue) {
-          this.encryptCredentials[credentialName] = encryptedValue;
-        }
+        await Promise.all(
+          credentialNames.map(async (credentialName) => {
+            const hashedName = await hashData(credentialScope + credentialName);
+            const encryptedValue = localStorage.getItem(
+              `credential-${hashedName}`
+            );
+
+            if (encryptedValue) {
+              if (credentialScope === CredentialsScopeEnum.Sellsy) {
+                (
+                  this.encryptedCredentials[
+                    credentialScope
+                  ] as SellsyCredentials
+                )[credentialName as keyof SellsyCredentials] = encryptedValue;
+              } else if (credentialScope === CredentialsScopeEnum.Klaviyo) {
+                (
+                  this.encryptedCredentials[
+                    credentialScope
+                  ] as KlaviyoCredentials
+                )[credentialName as keyof KlaviyoCredentials] = encryptedValue;
+              }
+            }
+          })
+        );
       })
     );
-    if (this.validEncryptedCredentials()) {
-      if (!this.hashedPin) {
-        this.setStatus(CredentialKeeperStatus.RequirePin);
-      } else {
-        this.setStatus(CredentialKeeperStatus.Ready);
-      }
-    } else {
-      this.setStatus(CredentialKeeperStatus.WaitingCredentials);
-    }
   }
 
   public async testPin(pin: string): Promise<boolean> {
     const hashedPin = await hashData(pin);
     const decryptedValue = await this.decryptData(
-      this.encryptCredentials.consumerToken,
+      this.encryptedCredentials[CredentialsScopeEnum.Test],
       hashedPin
     );
 
-    if (!decryptedValue) {
+    const validTestPin = decryptedValue.includes(validTag);
+    if (!validTestPin) {
       this.testPinCount++;
       if (this.testPinCount >= 3) {
         await this.reset();
@@ -171,7 +215,6 @@ class CredentialKeeper {
       return false;
     } else {
       this.setHashedPin(hashedPin);
-      this.setStatus(CredentialKeeperStatus.Ready);
       return true;
     }
   }
@@ -179,8 +222,9 @@ class CredentialKeeper {
   private async decryptData(
     encryptedData: string,
     hashedPin: string
-  ): Promise<string> {    
-    const [encryptedDataBase64, ivBase64] = encryptedData.split(".");
+  ): Promise<string> {
+    const ivBase64 = encryptedData.slice(-16);
+    const encryptedDataBase64 = encryptedData.slice(0, -16);
     const key = await this.generateKeyFromPin(hashedPin);
     const encryptedBuffer = b64toab(encryptedDataBase64);
     const initializationVector = b64toab(ivBase64);
@@ -195,10 +239,7 @@ class CredentialKeeper {
         key,
         encryptedBuffer
       );
-      const decodedData = new TextDecoder().decode(decryptedBuffer);
-      const validData = decodedData.includes(validTag);
-      if (!validData) return "";
-      return decodedData.replace(validTag, "");
+      return new TextDecoder().decode(decryptedBuffer);
     } catch (error) {
       return "";
     }
@@ -206,7 +247,7 @@ class CredentialKeeper {
 
   private async encryptData(data: string, pin: string) {
     const key = await this.generateKeyFromPin(pin);
-    const initializationVector = crypto.getRandomValues(new Uint8Array(12)); // 12 bytes for IV
+    const initializationVector = crypto.getRandomValues(new Uint8Array(12));
     const encodedData = new TextEncoder().encode(data);
 
     const encryptedBuffer = await crypto.subtle.encrypt(
@@ -221,7 +262,7 @@ class CredentialKeeper {
 
     const encryptedDataBase64 = ab2b64(encryptedBuffer);
     const ivBase64 = ab2b64(initializationVector);
-    return `${encryptedDataBase64}.${ivBase64}`;
+    return `${encryptedDataBase64}${ivBase64}`;
   }
 
   private async generateKeyFromPin(pin: string) {

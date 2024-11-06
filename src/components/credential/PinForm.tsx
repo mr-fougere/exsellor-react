@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import CredentialKeeper from "../../services/CredentialKeeper";
 import PinDisplay from "../reusable/PinDisplay";
+import { useNavigate } from "react-router-dom";
 
 type PinFormProps = {
   credentialKeeper: CredentialKeeper;
@@ -11,6 +12,7 @@ export const PinForm = ({ credentialKeeper, length = 4 }: PinFormProps) => {
   const [remainingPinTest, setRemainingPinTest] = useState<number>(
     credentialKeeper.remainingPinTest
   );
+  const navigate = useNavigate();
   const pinRef = useRef<string[]>([]);
   const [pinDisplay, setPinDisplay] = useState<string[]>([]);
 
@@ -36,6 +38,7 @@ export const PinForm = ({ credentialKeeper, length = 4 }: PinFormProps) => {
     if (pinRef.current.length === length) {
       await credentialKeeper.testPin(pinRef.current.join("")).then((result) => {
         if (result) {
+          navigate("/sellsy/exports");
           console.log("Pin correct");
         } else {
           setRemainingPinTest(credentialKeeper.remainingPinTest);
