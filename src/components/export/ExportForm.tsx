@@ -109,7 +109,7 @@ const ExportForm = ({
   const periodStartInputDate = watch("periodStartInputDate", formattedFirstDay);
   const periodEndInputDate = watch("periodEndInputDate", formattedToday);
   const documentType = watch("documentType", DocumentType.Invoice);
-  const documentSteps = watch("steps", Object.values(InvoiceStep));
+  const documentSteps = watch("steps");
 
   const setDates = ({ start, end }: { start: Date; end: Date }) => {
     setValue("periodStartInputDate", formatInputDate(start));

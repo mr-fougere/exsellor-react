@@ -42,12 +42,18 @@ class SellsyClient {
     documentType,
     periodStartDate,
     periodEndDate,
-    steps
+    steps,
   }: ExportInformations): Promise<any> {
-    const { infos } = await this.getDocuments(documentType, 1, 1, {
-      start: periodStartDate,
-      end: periodEndDate,
-    },steps );
+    const { infos } = await this.getDocuments(
+      documentType,
+      1,
+      1,
+      {
+        start: periodStartDate,
+        end: periodEndDate,
+      },
+      steps
+    );
     return infos;
   }
 
@@ -86,8 +92,8 @@ class SellsyClient {
   async getAllDocTypesPeriodDates(): Promise<{
     [key in DocumentType]: PeriodDates;
   }> {
-    const storedDocTypesPeriodDates = this.getStoredDocTypesPeriodDates();
-    if (storedDocTypesPeriodDates) return storedDocTypesPeriodDates;
+    //const storedDocTypesPeriodDates = this.getStoredDocTypesPeriodDates();
+    //if (storedDocTypesPeriodDates) return storedDocTypesPeriodDates;
 
     const documentTypes = Object.values(DocumentType);
     const documentTypesPeriodDates: { [key in DocumentType]: PeriodDates } = {
@@ -134,6 +140,7 @@ class SellsyClient {
 
   private defaultDocTypeSteps(documentType: DocumentType): DocumentSteps {
     let stepEnum = null;
+
     switch (documentType) {
       case DocumentType.Order:
         stepEnum = OrderStep;
@@ -151,6 +158,7 @@ class SellsyClient {
         stepEnum = DraftStep;
         break;
     }
+
     return Object.values(stepEnum);
   }
 
@@ -159,7 +167,7 @@ class SellsyClient {
     pagenum: number = 1,
     nbperpage: number = 1,
     periodDates: PeriodDates = { start: new Date(1), end: new Date() },
-    steps: DocumentSteps = this.defaultDocTypeSteps(documentType)
+    steps?: DocumentSteps
   ): Promise<DocumentsOutput> {
     const convertedDates = {
       start: periodDates.start.getTime() / 1000,
@@ -177,7 +185,7 @@ class SellsyClient {
         search: {
           periodecreationDate_start: convertedDates.start,
           periodecreationDate_end: convertedDates.end,
-          steps,
+          steps: steps ?? this.defaultDocTypeSteps(documentType),
         },
       },
     });

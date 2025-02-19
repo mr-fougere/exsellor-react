@@ -51,6 +51,7 @@ export default function StepMultiSelector({
         steps = DraftStep;
         break;
     }
+
     setAvailableSteps(Object.values(steps));
     setSelectedSteps(excludeDraftStep(Object.values(steps)));
   }, [documentType]);
